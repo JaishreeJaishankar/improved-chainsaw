@@ -20,8 +20,8 @@ class FirewallAnalyzer:
     A class to analyze firewall logs and provide recommendations for rule optimization.
     """
     
-    def __init__(self, log_file: str, rule_file: str):
-        """Initialize the FirewallAnalyzer with log and rule files."""
+    def __init__(self, log_file: str, rule_file: str = None):
+        """Initialize the FirewallAnalyzer with log file and optional rule file."""
         self.log_file = log_file
         self.rule_file = rule_file
         self.logs_df = None
@@ -29,16 +29,18 @@ class FirewallAnalyzer:
         self.load_data()
         
     def load_data(self) -> None:
-        """Load log and rule data from CSV files."""
+        """Load log data from CSV file and optional rule data for validation."""
         print(f"Loading log data from {self.log_file}...")
         self.logs_df = pd.read_csv(self.log_file)
         
         self.logs_df['timestamp'] = pd.to_datetime(self.logs_df['timestamp'])
         
-        print(f"Loading rule data from {self.rule_file}...")
-        self.rules_df = pd.read_csv(self.rule_file)
-        
-        print(f"Loaded {len(self.logs_df)} log entries and {len(self.rules_df)} rules.")
+        if self.rule_file:
+            print(f"Loading rule data from {self.rule_file} (for validation only)...")
+            self.rules_df = pd.read_csv(self.rule_file)
+            print(f"Loaded {len(self.logs_df)} log entries and {len(self.rules_df)} rules.")
+        else:
+            print(f"Loaded {len(self.logs_df)} log entries. No rule file provided.")
     
     def get_basic_stats(self) -> Dict[str, Any]:
         """Get basic statistics about the logs and rules."""
@@ -53,18 +55,24 @@ class FirewallAnalyzer:
         stats['unique_destination_ips'] = self.logs_df['destination.ip'].nunique()
         stats['unique_destination_ports'] = self.logs_df['destination.port'].nunique()
         
-        stats['total_rules'] = len(self.rules_df)
-        stats['rules_by_action'] = self.rules_df['action'].value_counts().to_dict()
-        stats['risky_rules'] = len(self.rules_df[self.rules_df['risky_permissive'] == 'risky'])
-        stats['permissive_rules'] = len(self.rules_df[self.rules_df['risky_permissive'] == 'permissive'])
-        
-        rule_usage = self.logs_df['rule.name'].value_counts().to_dict()
-        stats['rule_usage'] = rule_usage
-        
-        all_rule_names = set(self.rules_df['rule_name'])
-        used_rule_names = set(rule_usage.keys())
-        unused_rule_names = all_rule_names - used_rule_names
-        stats['unused_rules'] = list(unused_rule_names)
+        if self.rules_df is not None:
+            stats['total_rules'] = len(self.rules_df)
+            stats['rules_by_action'] = self.rules_df['action'].value_counts().to_dict()
+            stats['risky_rules'] = len(self.rules_df[self.rules_df['risky_permissive'] == 'risky'])
+            stats['permissive_rules'] = len(self.rules_df[self.rules_df['risky_permissive'] == 'permissive'])
+            
+            rule_usage = self.logs_df['rule.name'].value_counts().to_dict()
+            stats['rule_usage'] = rule_usage
+            
+            all_rule_names = set(self.rules_df['rule_name'])
+            used_rule_names = set(rule_usage.keys())
+            unused_rule_names = all_rule_names - used_rule_names
+            stats['unused_rules'] = list(unused_rule_names)
+        else:
+            rule_usage = self.logs_df['rule.name'].value_counts().to_dict()
+            stats['rule_usage'] = rule_usage
+            stats['total_rules'] = len(rule_usage)
+            stats['unused_rules'] = []
         
         return stats
         
@@ -125,8 +133,42 @@ class FirewallAnalyzer:
         
         return anomalies
         
+    def analyze_log_based_patterns(self) -> Dict[str, Any]:
+        """Analyze log patterns focusing on source.ip, destination.port, and destination.ip."""
+        patterns = {}
+        
+        rule_names = self.logs_df['rule.name'].unique()
+        
+        rule_patterns = {}
+        for rule_name in rule_names:
+            rule_logs = self.logs_df[self.logs_df['rule.name'] == rule_name]
+            
+            source_ips = rule_logs['source.ip'].unique()
+            dest_ips = rule_logs['destination.ip'].unique()
+            dest_ports = rule_logs['destination.port'].unique()
+            
+            source_networks = self._group_ips_into_networks(source_ips)
+            dest_networks = self._group_ips_into_networks(dest_ips)
+            service_names = self._ports_to_services(dest_ports)
+            
+            rule_patterns[rule_name] = {
+                'source_networks': source_networks,
+                'destination_networks': dest_networks,
+                'services': service_names,
+                'log_count': len(rule_logs),
+                'source_ips': source_ips.tolist(),
+                'destination_ips': dest_ips.tolist(),
+                'destination_ports': dest_ports.tolist()
+            }
+        
+        patterns['rule_patterns'] = rule_patterns
+        return patterns
+        
     def analyze_rule_usage(self) -> Dict[str, Any]:
         """Analyze rule usage and identify optimization opportunities."""
+        if self.rules_df is None:
+            return self.analyze_log_based_patterns()
+            
         rule_analysis = {}
         
         rule_usage = self.logs_df['rule.name'].value_counts().reset_index()
@@ -183,9 +225,13 @@ class FirewallAnalyzer:
         
         return rule_analysis
         
-    def _group_ips_into_networks(self, ip_list: List[str]) -> List[str]:
+    def _group_ips_into_networks(self, ip_list) -> List[str]:
         """Group a list of IP addresses into network CIDR notations."""
-        if not ip_list:
+        if isinstance(ip_list, pd.Series):
+            if ip_list.empty:
+                return []
+            ip_list = ip_list.tolist()
+        elif len(ip_list) == 0:
             return []
         
         try:
@@ -239,8 +285,39 @@ class FirewallAnalyzer:
         
         return services
         
+    def generate_log_based_optimized_rules(self) -> Dict[str, Any]:
+        """Generate optimized rule recommendations based solely on log analysis."""
+        optimized_rules = {}
+        
+        log_patterns = self.analyze_log_based_patterns()
+        
+        for rule_name, pattern in log_patterns['rule_patterns'].items():
+            optimized_rule = {
+                'rule_name': rule_name,
+                'source_address': ', '.join(pattern['source_networks']) if pattern['source_networks'] else 'any',
+                'destination_address': ', '.join(pattern['destination_networks']) if pattern['destination_networks'] else 'any',
+                'service': ', '.join(pattern['services']) if pattern['services'] else 'any',
+                'log_count': pattern['log_count']
+            }
+            
+            recommendations = [
+                f"Optimize source address to {optimized_rule['source_address']}",
+                f"Optimize destination address to {optimized_rule['destination_address']}",
+                f"Optimize service to {optimized_rule['service']}"
+            ]
+            
+            optimized_rules[rule_name] = {
+                'optimized_rule': optimized_rule,
+                'recommendation': '; '.join(recommendations)
+            }
+        
+        return optimized_rules
+        
     def generate_optimized_rules(self) -> Dict[str, Any]:
         """Generate optimized rule recommendations based on analysis."""
+        if self.rules_df is None:
+            return self.generate_log_based_optimized_rules()
+            
         optimized_rules = {}
         
         rule_analysis = self.analyze_rule_usage()
@@ -402,7 +479,10 @@ class FirewallAnalyzer:
         
         report['anomalies'] = self.identify_anomalies()
         
-        report['rule_analysis'] = self.analyze_rule_usage()
+        if self.rules_df is None:
+            report['log_analysis'] = self.analyze_log_based_patterns()
+        else:
+            report['rule_analysis'] = self.analyze_rule_usage()
         
         report['optimized_rules'] = self.generate_optimized_rules()
         
@@ -460,8 +540,8 @@ class FirewallAnalyzer:
                     <li>Total log entries analyzed: {report['basic_stats']['total_log_entries']}</li>
                     <li>Date range: {report['basic_stats']['date_range']['start']} to {report['basic_stats']['date_range']['end']}</li>
                     <li>Total rules: {report['basic_stats']['total_rules']}</li>
-                    <li>Risky rules: {report['basic_stats']['risky_rules']}</li>
-                    <li>Permissive rules: {report['basic_stats']['permissive_rules']}</li>
+                    {f"<li>Risky rules: {report['basic_stats']['risky_rules']}</li>" if 'risky_rules' in report['basic_stats'] else ""}
+                    {f"<li>Permissive rules: {report['basic_stats']['permissive_rules']}</li>" if 'permissive_rules' in report['basic_stats'] else ""}
                 </ul>
             </div>
             
@@ -604,23 +684,26 @@ class FirewallAnalyzer:
         """
         
         for rule_name, rule_info in report['optimized_rules'].items():
-            original_rule = rule_info['original_rule']
             recommendation = rule_info['recommendation']
             optimized_rule = rule_info['optimized_rule']
             
-            current_config = f"""
-                <strong>Source:</strong> {original_rule['source_address']}<br>
-                <strong>Destination:</strong> {original_rule['destination_address']}<br>
-                <strong>Service:</strong> {original_rule['service']}<br>
-                <strong>Application:</strong> {original_rule['application']}
-            """
+            if 'original_rule' in rule_info:
+                original_rule = rule_info['original_rule']
+                current_config = f"""
+                    <strong>Source:</strong> {original_rule['source_address']}<br>
+                    <strong>Destination:</strong> {original_rule['destination_address']}<br>
+                    <strong>Service:</strong> {original_rule['service']}<br>
+                    <strong>Application:</strong> {original_rule.get('application', 'any')}
+                """
+            else:
+                current_config = "<em>No rule definition available - using log-based analysis</em>"
             
             if optimized_rule:
                 optimized_config = f"""
                     <strong>Source:</strong> {optimized_rule['source_address']}<br>
                     <strong>Destination:</strong> {optimized_rule['destination_address']}<br>
                     <strong>Service:</strong> {optimized_rule['service']}<br>
-                    <strong>Application:</strong> {optimized_rule['application']}
+                    <strong>Application:</strong> {optimized_rule.get('application', 'any')}
                 """
             else:
                 optimized_config = "N/A"

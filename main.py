@@ -28,8 +28,9 @@ def main():
     parser.add_argument(
         '--rule-file',
         type=str,
-        default='firewall_rules.csv',
-        help='Path to the firewall rule file (CSV)'
+        required=False,
+        default=None,
+        help='Path to the firewall rule file (CSV) - optional, used only for validation'
     )
     parser.add_argument(
         '--output-dir',
@@ -71,12 +72,16 @@ def main():
     print("\nKey findings:")
     
     stats = analyzer.get_basic_stats()
-    print(f"- Analyzed {stats['total_log_entries']} log entries across {stats['total_rules']} rules")
-    print(f"- Found {len(stats['unused_rules'])} unused rules that could be removed")
+    print(f"- Analyzed {stats['total_log_entries']} log entries")
+    
+    if 'total_rules' in stats:
+        print(f"- Found {stats['total_rules']} rules in logs")
+        if 'unused_rules' in stats and stats['unused_rules']:
+            print(f"- Found {len(stats['unused_rules'])} unused rules that could be removed")
     
     optimized_rules = analyzer.generate_optimized_rules()
     rules_with_recommendations = sum(1 for rule_info in optimized_rules.values() 
-                                    if rule_info['recommendation'] != 'No optimization needed')
+                                   if 'recommendation' in rule_info and rule_info['recommendation'] != 'No optimization needed')
     print(f"- Identified {rules_with_recommendations} rules that could be optimized")
     
     anomalies = analyzer.identify_anomalies()
@@ -86,10 +91,11 @@ def main():
         print(f"- Found {anomalies['after_hours_traffic']['percentage']:.1f}% of traffic outside business hours")
     
     print("\nRecommendations:")
-    print("1. Review and remove unused rules to simplify management")
-    print("2. Restrict overly permissive rules by limiting source/destination addresses")
-    print("3. Replace 'any' service specifications with specific services based on actual usage")
-    print("4. Monitor unusual traffic patterns for potential security incidents")
+    print("1. Optimize firewall rules by limiting source/destination addresses based on actual traffic")
+    print("2. Restrict services to specific ports based on observed usage")
+    print("3. Monitor unusual traffic patterns for potential security incidents")
+    if analyzer.rules_df is not None:
+        print("4. Review and remove unused rules to simplify management")
     
     if args.html_report:
         print(f"\nFor detailed analysis, open the HTML report at: {html_report_file}")
