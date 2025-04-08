@@ -226,7 +226,7 @@ class FirewallAnalyzer:
         return rule_analysis
         
     def _group_ips_into_networks(self, ip_list) -> List[str]:
-        """Group a list of IP addresses into network CIDR notations."""
+        """Group a list of IP addresses into precise network CIDR notations."""
         if isinstance(ip_list, pd.Series):
             if ip_list.empty:
                 return []
@@ -237,22 +237,60 @@ class FirewallAnalyzer:
         try:
             ip_objects = [ipaddress.ip_address(ip) for ip in ip_list]
             
-            ip_groups = defaultdict(list)
-            for ip in ip_objects:
-                if isinstance(ip, ipaddress.IPv4Address):
-                    prefix = '.'.join(str(ip).split('.')[:2])
-                    ip_groups[prefix].append(ip)
+            ipv4_objects = [ip for ip in ip_objects if isinstance(ip, ipaddress.IPv4Address)]
+            
+            if not ipv4_objects:
+                return [f"{ip}/32" for ip in ip_list]
+            
+            ipv4_objects.sort()
             
             networks = []
-            for prefix, ips in ip_groups.items():
-                if len(ips) > 1:
-                    networks.append(f"{prefix}.0.0/16")
+            current_ips = []
+            
+            for ip in ipv4_objects:
+                if not current_ips:
+                    current_ips.append(ip)
+                    continue
+                
+                if int(ip) - int(current_ips[-1]) <= 256:  # Within 256 addresses
+                    current_ips.append(ip)
                 else:
-                    networks.append(f"{ips[0]}/32")
+                    networks.extend(self._find_optimal_subnets(current_ips))
+                    current_ips = [ip]
+            
+            if current_ips:
+                networks.extend(self._find_optimal_subnets(current_ips))
             
             return networks
         except Exception as e:
             print(f"Error grouping IPs: {e}")
+            return [f"{ip}/32" for ip in ip_list]
+    
+    def _find_optimal_subnets(self, ip_list) -> List[str]:
+        """Find the optimal subnets for a list of IP addresses."""
+        if len(ip_list) == 1:
+            return [f"{ip_list[0]}/32"]
+        
+        ip_ints = [int(ip) for ip in ip_list]
+        min_ip = min(ip_ints)
+        max_ip = max(ip_ints)
+        
+        for prefix_len in range(31, 15, -1):
+            try:
+                network = ipaddress.IPv4Network(f"{ipaddress.IPv4Address(min_ip)}/{prefix_len}", strict=False)
+                
+                if all(ipaddress.IPv4Address(ip_int) in network for ip_int in ip_ints):
+                    return [str(network)]
+            except ValueError:
+                continue
+        
+        if len(ip_list) > 2:
+            mid = len(ip_list) // 2
+            return (
+                self._find_optimal_subnets(ip_list[:mid]) + 
+                self._find_optimal_subnets(ip_list[mid:])
+            )
+        else:
             return [f"{ip}/32" for ip in ip_list]
     
     def _ports_to_services(self, port_list: List[int]) -> List[str]:
