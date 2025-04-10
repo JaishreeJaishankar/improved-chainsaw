@@ -1,3 +1,4 @@
+# main.py
 """
 Firewall Log Analyzer and Rule Optimizer
 
@@ -10,42 +11,14 @@ import os
 from firewall_analyzer import FirewallAnalyzer
 
 def main():
-    """Main entry point for the firewall analyzer tool."""
-    parser = argparse.ArgumentParser(
-        description='Analyze firewall logs and optimize rules'
-    )
-    parser.add_argument(
-        '--generate-sample',
-        action='store_true',
-        help='Generate sample data for demonstration'
-    )
-    parser.add_argument(
-        '--log-file',
-        type=str,
-        default='firewall_logs.csv',
-        help='Path to the firewall log file (CSV)'
-    )
-    parser.add_argument(
-        '--rule-file',
-        type=str,
-        required=False,
-        default=None,
-        help='Path to the firewall rule file (CSV) - optional, used only for validation'
-    )
-    parser.add_argument(
-        '--output-dir',
-        type=str,
-        default='output',
-        help='Directory to store output files'
-    )
-    parser.add_argument(
-        '--html-report',
-        action='store_true',
-        help='Generate HTML report with visualizations'
-    )
+    parser = argparse.ArgumentParser(description='Analyze firewall logs and optimize rules')
+    parser.add_argument('--generate-sample', action='store_true', help='Generate sample data for demonstration')
+    parser.add_argument('--log-file', type=str, default='firewall_logs.csv', help='Path to the firewall log file (CSV)')
+    parser.add_argument('--rule-file', type=str, default=None, help='Path to the firewall rule file (CSV) - optional, used only for validation')
+    parser.add_argument('--output-dir', type=str, default='output', help='Directory to store output files')
+    parser.add_argument('--html-report', action='store_true', help='Generate HTML report with visualizations')
     
     args = parser.parse_args()
-    
     os.makedirs(args.output_dir, exist_ok=True)
     
     if args.generate_sample:
@@ -57,7 +30,7 @@ def main():
     
     print("Generating visualizations...")
     visualization_dir = os.path.join(args.output_dir, 'visualizations')
-    visualization_files = analyzer.visualize_traffic(visualization_dir)
+    analyzer.visualize_traffic(visualization_dir)
     
     print("Generating analysis report...")
     report_file = os.path.join(args.output_dir, 'firewall_analysis_report.json')
@@ -69,21 +42,15 @@ def main():
         analyzer.generate_html_report(html_report_file)
     
     print(f"\nAnalysis complete! Results saved to {args.output_dir}")
-    print("\nKey findings:")
-    
     stats = analyzer.get_basic_stats()
     print(f"- Analyzed {stats['total_log_entries']} log entries")
-    
     if 'total_rules' in stats:
         print(f"- Found {stats['total_rules']} rules in logs")
         if 'unused_rules' in stats and stats['unused_rules']:
             print(f"- Found {len(stats['unused_rules'])} unused rules that could be removed")
-    
     optimized_rules = analyzer.generate_optimized_rules()
-    rules_with_recommendations = sum(1 for rule_info in optimized_rules.values() 
-                                   if 'recommendation' in rule_info and rule_info['recommendation'] != 'No optimization needed')
+    rules_with_recommendations = sum(1 for rule_info in optimized_rules.values() if rule_info.get('recommendation', '') != 'No optimization needed')
     print(f"- Identified {rules_with_recommendations} rules that could be optimized")
-    
     anomalies = analyzer.identify_anomalies()
     if 'unusual_ports' in anomalies:
         print(f"- Detected {len(anomalies['unusual_ports'])} unusual ports in the traffic")
