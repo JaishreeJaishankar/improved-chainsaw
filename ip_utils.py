@@ -2,54 +2,65 @@
 import ipaddress
 from typing import List
 
-def group_ips_into_networks(ip_list) -> List[str]:
-    # Convert to list if necessary
-    if hasattr(ip_list, 'empty') and ip_list.empty:
+def group_ips_into_networks(ip_list: List[str]) -> List[str]:
+    """
+    Convert a list of IP addresses into aggregated CIDRs 
+    (if addresses are within 256 increments).
+    """
+    if not ip_list:
         return []
-    ip_list = list(ip_list)
-    try:
-        ip_objects = [ipaddress.ip_address(ip) for ip in ip_list]
-        ipv4_objects = [ip for ip in ip_objects if isinstance(ip, ipaddress.IPv4Address)]
-        if not ipv4_objects:
-            return [f"{ip}/32" for ip in ip_list]
-        ipv4_objects.sort()
-        networks = []
-        current_ips = []
-        for ip in ipv4_objects:
-            if not current_ips:
-                current_ips.append(ip)
-                continue
-            if int(ip) - int(current_ips[-1]) <= 256:  # Within 256 addresses
-                current_ips.append(ip)
-            else:
-                networks.extend(_find_optimal_subnets(current_ips))
-                current_ips = [ip]
-        if current_ips:
-            networks.extend(_find_optimal_subnets(current_ips))
-        return networks
-    except Exception as e:
-        print(f"Error grouping IPs: {e}")
-        return [f"{ip}/32" for ip in ip_list]
-
-def _find_optimal_subnets(ip_list) -> List[str]:
-    if len(ip_list) == 1:
-        return [f"{ip_list[0]}/32"]
-    ip_ints = [int(ip) for ip in ip_list]
-    min_ip = min(ip_ints)
-    for prefix_len in range(31, 15, -1):
+    
+    ip_objs = []
+    for ip in ip_list:
         try:
-            network = ipaddress.IPv4Network(f"{ipaddress.IPv4Address(min_ip)}/{prefix_len}", strict=False)
-            if all(ipaddress.IPv4Address(ip_int) in network for ip_int in ip_ints):
-                return [str(network)]
+            ip_objs.append(ipaddress.ip_address(ip))
         except ValueError:
-            continue
-    if len(ip_list) > 2:
-        mid = len(ip_list) // 2
-        return _find_optimal_subnets(ip_list[:mid]) + _find_optimal_subnets(ip_list[mid:])
-    else:
+            print(f"Warning: invalid IP address {ip}, skipping.")
+    
+    ipv4_objs = [x for x in ip_objs if isinstance(x, ipaddress.IPv4Address)]
+    
+    if not ipv4_objs:
         return [f"{ip}/32" for ip in ip_list]
+    
+    ipv4_objs.sort()
+    networks = []
+    current = [ipv4_objs[0]]
+    
+    def _find_optimal_subnets(block: List[ipaddress.IPv4Address]) -> List[str]:
+        if len(block) == 1:
+            return [f"{block[0]}/32"]
+        ip_ints = [int(x) for x in block]
+        min_ip = min(ip_ints)
+        for prefix_len in range(31, 15, -1):
+            try:
+                net = ipaddress.IPv4Network(f"{ipaddress.IPv4Address(min_ip)}/{prefix_len}", strict=False)
+                if all(ipaddress.IPv4Address(val) in net for val in ip_ints):
+                    return [str(net)]
+            except ValueError:
+                continue
+        
+        if len(block) > 2:
+            mid = len(block) // 2
+            return _find_optimal_subnets(block[:mid]) + _find_optimal_subnets(block[mid:])
+        else:
+            return [f"{ip}/32" for ip in block]
+    
+    for i in range(1, len(ipv4_objs)):
+        if (int(ipv4_objs[i]) - int(ipv4_objs[i-1])) <= 256:
+            current.append(ipv4_objs[i])
+        else:
+            networks.extend(_find_optimal_subnets(current))
+            current = [ipv4_objs[i]]
+    
+    if current:
+        networks.extend(_find_optimal_subnets(current))
+    
+    return networks
 
 def ports_to_services(port_list: List[int]) -> List[str]:
+    """
+    Maps known ports to service names, lumps the rest into custom-ports.
+    """
     port_to_service = {
         80: 'http',
         443: 'https',
@@ -64,12 +75,12 @@ def ports_to_services(port_list: List[int]) -> List[str]:
         1433: 'mssql'
     }
     services = []
-    unknown_ports = []
-    for port in port_list:
-        if port in port_to_service:
-            services.append(port_to_service[port])
+    unknown = []
+    for p in port_list:
+        if p in port_to_service:
+            services.append(port_to_service[p])
         else:
-            unknown_ports.append(str(port))
-    if unknown_ports:
-        services.append(f"custom-ports-{'-'.join(unknown_ports)}")
+            unknown.append(str(p))
+    if unknown:
+        services.append("custom-ports-" + "-".join(unknown))
     return services

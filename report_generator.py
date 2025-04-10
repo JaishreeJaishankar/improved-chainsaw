@@ -5,23 +5,26 @@ import numpy as np
 import pandas as pd
 from typing import Dict, Any
 
-def generate_report(basic_stats: Dict[str, Any],
-                    traffic_patterns: Dict[str, Any],
-                    anomalies: Dict[str, Any],
-                    rule_analysis: Dict[str, Any],
-                    optimized_rules: Dict[str, Any],
-                    output_file: str = 'firewall_analysis_report.json') -> Dict[str, Any]:
-    report = {}
-    report['basic_stats'] = basic_stats
-    report['traffic_patterns'] = traffic_patterns
-    report['anomalies'] = anomalies
-    report['rule_analysis'] = rule_analysis
-    report['optimized_rules'] = optimized_rules
-
-    class CustomJSONEncoder(json.JSONEncoder):
+def generate_json_report(basic_stats: Dict[str, Any],
+                         traffic_patterns: Dict[str, Any],
+                         anomalies: Dict[str, Any],
+                         optimized_rule: Dict[str, Any],
+                         output_file: str) -> Dict[str, Any]:
+    """
+    Save a JSON with stats, patterns, anomalies, 
+    and the single 'optimized rule' aggregator.
+    """
+    report = {
+        "basic_stats": basic_stats,
+        "traffic_patterns": traffic_patterns,
+        "anomalies": anomalies,
+        "optimized_single_rule": optimized_rule
+    }
+    
+    class CustomEncoder(json.JSONEncoder):
         def default(self, obj):
             if isinstance(obj, pd.Timestamp):
-                return obj.strftime('%Y-%m-%d %H:%M:%S')
+                return obj.strftime("%Y-%m-%d %H:%M:%S")
             elif isinstance(obj, np.integer):
                 return int(obj)
             elif isinstance(obj, np.floating):
@@ -29,17 +32,23 @@ def generate_report(basic_stats: Dict[str, Any],
             elif isinstance(obj, np.ndarray):
                 return obj.tolist()
             return super().default(obj)
-
-    with open(output_file, 'w') as f:
-        json.dump(report, f, indent=4, cls=CustomJSONEncoder)
     
-    print(f"Report generated and saved to {output_file}")
+    with open(output_file, "w") as f:
+        json.dump(report, f, indent=4, cls=CustomEncoder)
+    
+    print(f"JSON report generated at {output_file}")
     return report
 
-def generate_html_report(report: Dict[str, Any], visualization_files: Dict[str, str],
-                         output_file: str = 'firewall_analysis_report.html') -> None:
-    html_content = f"""
-<!DOCTYPE html>
+def generate_html_report(report: Dict[str, Any],
+                         visualization_files: Dict[str, str],
+                         output_file: str) -> None:
+    """
+    Creates an HTML file that displays basic stats, traffic patterns, anomalies,
+    and a summary of the single aggregated rule. Also references the chart images.
+    """
+    now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    
+    html = f"""<!DOCTYPE html>
 <html>
 <head>
     <title>Firewall Analysis Report</title>
@@ -47,200 +56,118 @@ def generate_html_report(report: Dict[str, Any], visualization_files: Dict[str, 
         body {{ font-family: Arial, sans-serif; margin: 20px; }}
         h1, h2, h3 {{ color: #333; }}
         .section {{ margin-bottom: 30px; }}
-        .visualization {{ margin: 20px 0; text-align: center; }}
-        .visualization img {{ max-width: 100%; border: 1px solid #ddd; }}
         table {{ border-collapse: collapse; width: 100%; }}
-        th, td {{ border: 1px solid #ddd; padding: 8px; text-align: left; }}
+        th, td {{ border: 1px solid #ddd; padding: 8px; }}
         th {{ background-color: #f2f2f2; }}
-        tr:nth-child(even) {{ background-color: #f9f9f9; }}
+        .visualization img {{ max-width: 100%; border: 1px solid #ddd; }}
         .recommendation {{ background-color: #fffacd; padding: 10px; border-left: 4px solid #ffd700; }}
-        .warning {{ background-color: #ffebee; padding: 10px; border-left: 4px solid #f44336; }}
     </style>
 </head>
 <body>
     <h1>Firewall Analysis Report</h1>
-    
     <div class="section">
-        <h2>Executive Summary</h2>
-        <p>This report analyzes firewall logs and rules to identify optimization opportunities and security improvements.</p>
+        <h2>Basic Statistics</h2>
         <ul>
-            <li>Total log entries analyzed: {report['basic_stats']['total_log_entries']}</li>
-            <li>Date range: {report['basic_stats']['date_range']['start']} to {report['basic_stats']['date_range']['end']}</li>
-            <li>Total rules: {report['basic_stats']['total_rules']}</li>
-            {f"<li>Risky rules: {report['basic_stats']['risky_rules']}</li>" if 'risky_rules' in report['basic_stats'] else ""}
-            {f"<li>Permissive rules: {report['basic_stats']['permissive_rules']}</li>" if 'permissive_rules' in report['basic_stats'] else ""}
+            <li>Total log entries: {report['basic_stats']['total_log_entries']}</li>
+            <li>Unique source IPs: {report['basic_stats']['unique_source_ips']}</li>
+            <li>Unique destination IPs: {report['basic_stats']['unique_destination_ips']}</li>
+            <li>Unique destination ports: {report['basic_stats']['unique_destination_ports']}</li>
         </ul>
     </div>
-    
+
     <div class="section">
         <h2>Traffic Visualizations</h2>
         <div class="visualization">
-            <h3>Traffic Over Time</h3>
-            <img src="{visualization_files['traffic_over_time']}" alt="Traffic Over Time">
+            <h3>Top Source IPs</h3>
+            <img src="{visualization_files['top_source_ips']}" alt="Top Source IPs">
         </div>
         <div class="visualization">
-            <h3>Traffic by Hour of Day</h3>
-            <img src="{visualization_files['traffic_by_hour']}" alt="Traffic by Hour">
+            <h3>Top Destination IPs</h3>
+            <img src="{visualization_files['top_destination_ips']}" alt="Top Destination IPs">
         </div>
         <div class="visualization">
-            <h3>Traffic by Rule</h3>
-            <img src="{visualization_files['traffic_by_rule']}" alt="Traffic by Rule">
+            <h3>Top Destination Ports</h3>
+            <img src="{visualization_files['top_destination_ports']}" alt="Top Destination Ports">
         </div>
         <div class="visualization">
-            <h3>Traffic by Source Zone</h3>
-            <img src="{visualization_files['traffic_by_zone']}" alt="Traffic by Zone">
-        </div>
-        <div class="visualization">
-            <h3>Network Traffic Graph</h3>
+            <h3>Network Graph</h3>
             <img src="{visualization_files['network_graph']}" alt="Network Graph">
         </div>
     </div>
     
     <div class="section">
-        <h2>Top Traffic Patterns</h2>
+        <h2>Traffic Patterns</h2>
         <h3>Top Source IPs</h3>
         <table>
-            <tr>
-                <th>Source IP</th>
-                <th>Count</th>
-            </tr>
+            <tr><th>Source IP</th><th>Count</th></tr>
     """
-    for ip, count in report['traffic_patterns']['top_source_ips'].items():
-        html_content += f"""
-            <tr>
-                <td>{ip}</td>
-                <td>{count}</td>
-            </tr>
-        """
-    html_content += """
+    for ip, cnt in report["traffic_patterns"]["top_source_ips"].items():
+        html += f"<tr><td>{ip}</td><td>{cnt}</td></tr>"
+    
+    html += """
         </table>
         <h3>Top Destination IPs</h3>
         <table>
-            <tr>
-                <th>Destination IP</th>
-                <th>Count</th>
-            </tr>
+            <tr><th>Destination IP</th><th>Count</th></tr>
     """
-    for ip, count in report['traffic_patterns']['top_destination_ips'].items():
-        html_content += f"""
-            <tr>
-                <td>{ip}</td>
-                <td>{count}</td>
-            </tr>
-        """
-    html_content += """
+    for ip, cnt in report["traffic_patterns"]["top_destination_ips"].items():
+        html += f"<tr><td>{ip}</td><td>{cnt}</td></tr>"
+    
+    html += """
         </table>
         <h3>Top Destination Ports</h3>
         <table>
-            <tr>
-                <th>Port</th>
-                <th>Count</th>
-            </tr>
+            <tr><th>Port</th><th>Count</th></tr>
     """
-    for port, count in report['traffic_patterns']['top_destination_ports'].items():
-        html_content += f"""
-            <tr>
-                <td>{port}</td>
-                <td>{count}</td>
-            </tr>
-        """
-    html_content += """
+    for port, cnt in report["traffic_patterns"]["top_destination_ports"].items():
+        html += f"<tr><td>{port}</td><td>{cnt}</td></tr>"
+    
+    html += """
         </table>
     </div>
     
     <div class="section">
-        <h2>Anomalies and Unusual Patterns</h2>
+        <h2>Anomalies</h2>
     """
-    if 'unusual_ports' in report['anomalies']:
-        html_content += """
-            <h3>Unusual Ports</h3>
-            <table>
-                <tr>
-                    <th>Port</th>
-                    <th>Count</th>
-                </tr>
-        """
-        for port, count in report['anomalies']['unusual_ports'].items():
-            html_content += f"""
-                <tr>
-                    <td>{port}</td>
-                    <td>{count}</td>
-                </tr>
-            """
-        html_content += """
-            </table>
-        """
-    if 'after_hours_traffic' in report['anomalies']:
-        html_content += f"""
-            <h3>After Hours Traffic</h3>
-            <div class="warning">
-                <p>Detected {report['anomalies']['after_hours_traffic']['count']} log entries ({report['anomalies']['after_hours_traffic']['percentage']:.2f}%) outside normal business hours (8 AM - 6 PM).</p>
-            </div>
-        """
-    html_content += """
-    </div>
-    
-    <div class="section">
-        <h2>Rule Optimization Recommendations</h2>
+    anomalies = report["anomalies"]
+    if "unusual_ports" in anomalies:
+        html += "<h3>Unusual Ports</h3><ul>"
+        for p, c in anomalies["unusual_ports"].items():
+            html += f"<li>Port {p}: {c} occurrences</li>"
+        html += "</ul>"
+    if "low_occurrence_pairs" in anomalies:
+        html += """<h3>Low-Occurrence Source-Destination Pairs</h3>
         <table>
-            <tr>
-                <th>Rule Name</th>
-                <th>Current Configuration</th>
-                <th>Recommendation</th>
-                <th>Optimized Configuration</th>
-            </tr>
-    """
-    for rule_name, rule_info in report['optimized_rules'].items():
-        recommendation = rule_info['recommendation']
-        optimized_rule = rule_info['optimized_rule']
-        if 'original_rule' in rule_info:
-            original_rule = rule_info['original_rule']
-            current_config = f"""
-                    <strong>Source:</strong> {original_rule['source_address']}<br>
-                    <strong>Destination:</strong> {original_rule['destination_address']}<br>
-                    <strong>Service:</strong> {original_rule['service']}<br>
-                    <strong>Application:</strong> {original_rule.get('application', 'any')}
-            """
-        else:
-            current_config = "<em>No rule definition available - using log-based analysis</em>"
-        if optimized_rule:
-            optimized_config = f"""
-                    <strong>Source:</strong> {optimized_rule['source_address']}<br>
-                    <strong>Destination:</strong> {optimized_rule['destination_address']}<br>
-                    <strong>Service:</strong> {optimized_rule['service']}<br>
-                    <strong>Application:</strong> {optimized_rule.get('application', 'any')}
-            """
-        else:
-            optimized_config = "N/A"
-        html_content += f"""
-            <tr>
-                <td>{rule_name}</td>
-                <td>{current_config}</td>
-                <td class="recommendation">{recommendation}</td>
-                <td>{optimized_config}</td>
-            </tr>
+            <tr><th>Source IP</th><th>Destination IP</th><th>Count</th></tr>
         """
-    html_content += f"""
+        for row in anomalies["low_occurrence_pairs"]:
+            html += f"<tr><td>{row['source.ip']}</td><td>{row['destination.ip']}</td><td>{row['count']}</td></tr>"
+        html += "</table>"
+    html += "</div>"
+    
+    # Show the single aggregated "optimized rule"
+    rule = report["optimized_single_rule"]
+    html += f"""
+    <div class="section">
+        <h2>Optimized Single Rule</h2>
+        <p>This entire log belongs to one rule, 
+           so we've aggregated all source addresses, 
+           destination addresses, and ports into a single CIDR-based recommendation.</p>
+        <table>
+            <tr><th>Source CIDRs</th><td>{rule['source_address']}</td></tr>
+            <tr><th>Destination CIDRs</th><td>{rule['destination_address']}</td></tr>
+            <tr><th>Services</th><td>{rule['service']}</td></tr>
+            <tr><th>Log Count</th><td>{rule['log_count']}</td></tr>
         </table>
     </div>
-    
-    <div class="section">
-        <h2>Conclusion</h2>
-        <p>This analysis has identified several opportunities to optimize your firewall rules and improve security:</p>
-        <ul>
-            <li>Consider removing unused rules to simplify management and reduce potential attack surface</li>
-            <li>Restrict overly permissive rules by limiting source/destination addresses and services</li>
-            <li>Review rules marked as risky for potential security improvements</li>
-            <li>Monitor unusual traffic patterns and anomalies for potential security incidents</li>
-        </ul>
-    </div>
-    
+
     <footer>
-        <p>Generated on {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}</p>
+        <p>Generated on {now}</p>
     </footer>
 </body>
 </html>
-    """
-    with open(output_file, 'w') as f:
-        f.write(html_content)
-    print(f"HTML report generated and saved to {output_file}")
+"""
+    
+    with open(output_file, "w") as f:
+        f.write(html)
+    print(f"HTML report generated at {output_file}")
