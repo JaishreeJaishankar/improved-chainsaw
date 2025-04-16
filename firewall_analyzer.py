@@ -2,7 +2,8 @@
 from data_loader import load_logs
 from stats import get_basic_stats
 from traffic_analysis import analyze_traffic_patterns, identify_anomalies
-from rule_optimization import aggregate_single_rule
+from rule_optimization import aggregate_single_rule, generate_cidr_pair_rules, cap_rules_to_seven
+
 from visualization import visualize_traffic
 from report_generator import generate_json_report, generate_html_report
 
@@ -56,13 +57,23 @@ class FirewallAnalyzer:
         )
         return report_dict
     
+    def generate_lean_rule_set(self) -> list:
+        """
+        Returns a list of 'lean' rules, one per (destination port, adjacency group of destination IPs).
+        Each rule also aggregates source IP addresses for that group.
+        """
+        raw_rules  = generate_cidr_pair_rules(self.logs_df) 
+        capped     = cap_rules_to_seven(raw_rules)
+        return capped
+    
     def generate_html_report(self, html_file="firewall_analysis_report.html"):
         """
         Produces an HTML report referencing the bar charts and single aggregator.
         """
         # Generate the visualization
         vis_files = self.visualize_traffic()
+        lean_rules = self.generate_lean_rule_set()
         # Generate JSON-based dictionary in memory
         data = self.generate_report()
         from report_generator import generate_html_report
-        generate_html_report(data, vis_files, html_file)
+        generate_html_report(data, vis_files, lean_rules, html_file)

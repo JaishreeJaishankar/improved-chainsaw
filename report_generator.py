@@ -41,6 +41,7 @@ def generate_json_report(basic_stats: Dict[str, Any],
 
 def generate_html_report(report: Dict[str, Any],
                          visualization_files: Dict[str, str],
+                         lean_rules: list,
                          output_file: str) -> None:
     """
     Creates an HTML file that displays basic stats, traffic patterns, anomalies,
@@ -168,6 +169,29 @@ def generate_html_report(report: Dict[str, Any],
 </html>
 """
     
+    html += """
+    <div class="section">
+      <h2>Lean Optimized Rules</h2>
+      <table>
+        <tr>
+          <th>Rule Name</th>
+          <th>Source CIDRs</th>
+          <th>Destination CIDR</th>
+          <th>Service</th>
+          <th>Log Count</th>
+        </tr>
+    """
+    for rule_info in lean_rules:
+        html += f"""
+        <tr>
+          <td>{rule_info['rule_name']}</td>
+          <td>{rule_info['source_address']}</td>
+          <td>{rule_info['destination_address']}</td>
+          <td>{rule_info['service']}</td>
+          <td>{rule_info['log_count']}</td>
+        </tr>
+        """
+    html += "</table></div>"
     with open(output_file, "w") as f:
         f.write(html)
     print(f"HTML report generated at {output_file}")
