@@ -1,256 +1,149 @@
 import ipaddress
-from typing import List, Dict, Any, Tuple, Set
+from typing import List, Dict, Tuple
 import pandas as pd
-from collections import defaultdict
+import numpy as np
 
-def analyze_cidrs(cidrs: List[str]) -> Dict[str, Any]:
+def merge_overlapping_cidrs(cidr_list: List[str]) -> List[str]:
     """
-    Analyze a list of CIDRs to identify potential merging opportunities.
-    
-    Args:
-        cidrs: List of CIDR strings
-        
-    Returns:
-        Dictionary with analysis results
+    Merge CIDRs that are overlapping or adjacent to create more efficient rules.
+    Returns a list of optimized CIDR blocks.
     """
-    if not cidrs or cidrs == ["any"]:
-        return {"message": "No CIDRs to analyze or 'any' specified"}
-    
-    networks = []
-    for cidr in cidrs:
-        try:
-            network = ipaddress.ip_network(cidr.strip(), strict=False)
-            networks.append({
-                "cidr": str(network),
-                "network": network,
-                "size": network.num_addresses,
-                "first_ip": str(network.network_address),
-                "last_ip": str(network.broadcast_address)
-            })
-        except ValueError as e:
-            return {"error": f"Invalid CIDR: {cidr} - {str(e)}"}
-    
-    networks.sort(key=lambda x: x["size"])
-    
-    overlaps = []
-    for i, net1 in enumerate(networks):
-        for j, net2 in enumerate(networks):
-            if i != j:
-                if net1["network"].overlaps(net2["network"]):
-                    overlaps.append({
-                        "cidr1": net1["cidr"],
-                        "cidr2": net2["cidr"],
-                        "relationship": "overlaps"
-                    })
-    
-    mergeable = []
-    for i, net1 in enumerate(networks):
-        for j, net2 in enumerate(networks):
-            if i != j:
-                if (net1["network"].broadcast_address + 1 == net2["network"].network_address or
-                    net2["network"].broadcast_address + 1 == net1["network"].network_address):
-                    
-                    combined_ips = list(net1["network"].hosts()) + list(net2["network"].hosts())
-                    try:
-                        combined_network = ipaddress.ip_network(
-                            ipaddress.ip_network(
-                                f"{min(combined_ips)}/{max(net1['network'].prefixlen, net2['network'].prefixlen)}", 
-                                strict=False
-                            ).supernet(new_prefix=min(net1['network'].prefixlen, net2['network'].prefixlen) - 1),
-                            strict=False
-                        )
-                        
-                        mergeable.append({
-                            "cidr1": net1["cidr"],
-                            "cidr2": net2["cidr"],
-                            "merged_cidr": str(combined_network),
-                            "original_size": net1["size"] + net2["size"],
-                            "merged_size": combined_network.num_addresses,
-                            "efficiency": (net1["size"] + net2["size"]) / combined_network.num_addresses
-                        })
-                    except (ValueError, TypeError):
-                        pass
-    
-    mergeable.sort(key=lambda x: x["efficiency"], reverse=True)
-    
-    return {
-        "networks": networks,
-        "overlaps": overlaps,
-        "mergeable": mergeable
-    }
-
-def suggest_cidr_merges(cidrs: List[str], min_efficiency: float = 0.5) -> List[Dict[str, Any]]:
-    """
-    Suggest CIDR merges based on efficiency threshold.
-    
-    Args:
-        cidrs: List of CIDR strings
-        min_efficiency: Minimum efficiency threshold for merging (default: 0.5)
-        
-    Returns:
-        List of suggested merges
-    """
-    analysis = analyze_cidrs(cidrs)
-    
-    if "error" in analysis or "message" in analysis:
+    if not cidr_list:
         return []
     
-    suggestions = [merge for merge in analysis["mergeable"] if merge["efficiency"] >= min_efficiency]
+    networks = []
+    for cidr in cidr_list:
+        try:
+            networks.append(ipaddress.ip_network(cidr.strip(), strict=False))
+        except ValueError:
+            print(f"Warning: Invalid CIDR {cidr}, skipping.")
     
-    return suggestions
+    if not networks:
+        return []
+    
+    networks.sort(key=lambda x: (x.network_address, x.prefixlen))
+    
+    merged = []
+    current = networks[0]
+    
+    for network in networks[1:]:
+        current_broadcast = current.broadcast_address
+        next_first = network.network_address
+        
+        if int(next_first) <= int(current_broadcast) + 1:
+            try:
+                combined = ipaddress.ip_network(
+                    f"{current.network_address}/{min(current.prefixlen, network.prefixlen)}", 
+                    strict=False
+                )
+                
+                if (combined.num_addresses <= (current.num_addresses + network.num_addresses) * 1.5):
+                    current = combined
+                    continue
+            except ValueError:
+                pass
+        
+        merged.append(current)
+        current = network
+    
+    merged.append(current)
+    
+    return [str(net) for net in merged]
 
-def merge_cidrs(cidrs: List[str], merges_to_apply: List[Dict[str, Any]]) -> List[str]:
+def calculate_cidr_efficiency(original_cidrs: List[str], merged_cidrs: List[str]) -> Dict[str, float]:
     """
-    Apply specified merges to a list of CIDRs.
-    
-    Args:
-        cidrs: List of CIDR strings
-        merges_to_apply: List of merge dictionaries to apply
-        
-    Returns:
-        Updated list of CIDRs
+    Calculate the efficiency of CIDR merging by comparing
+    address space coverage, rule count reduction, and overall efficiency.
     """
-    if not cidrs or cidrs == ["any"] or not merges_to_apply:
-        return cidrs
+    if not original_cidrs or not merged_cidrs:
+        return {
+            "address_space_ratio": 1.0,
+            "rule_reduction_ratio": 1.0,
+            "overall_efficiency": 1.0
+        }
     
-    result_cidrs = cidrs.copy()
+    original_addr_count = sum(ipaddress.ip_network(cidr.strip(), strict=False).num_addresses 
+                             for cidr in original_cidrs)
+    merged_addr_count = sum(ipaddress.ip_network(cidr.strip(), strict=False).num_addresses 
+                          for cidr in merged_cidrs)
     
-    for merge in merges_to_apply:
-        if "cidr1" in merge and "cidr2" in merge and "merged_cidr" in merge:
-            if merge["cidr1"] in result_cidrs:
-                result_cidrs.remove(merge["cidr1"])
-            if merge["cidr2"] in result_cidrs:
-                result_cidrs.remove(merge["cidr2"])
-            
-            if merge["merged_cidr"] not in result_cidrs:
-                result_cidrs.append(merge["merged_cidr"])
+    address_space_ratio = original_addr_count / merged_addr_count if merged_addr_count > 0 else 1.0
+    rule_reduction_ratio = len(original_cidrs) / len(merged_cidrs) if len(merged_cidrs) > 0 else 1.0
     
-    return result_cidrs
-
-def interactive_cidr_merge(rule: Dict[str, Any]) -> Dict[str, Any]:
-    """
-    Interactive CIDR merging for a firewall rule.
+    overall_efficiency = (0.7 * address_space_ratio) + (0.3 * rule_reduction_ratio)
     
-    Args:
-        rule: Firewall rule dictionary
-        
-    Returns:
-        Updated rule with merged CIDRs
-    """
-    print("\nInteractive CIDR Merger")
-    print("======================")
-    
-    src_cidrs = [cidr.strip() for cidr in rule["source_address"].split(",")]
-    dst_cidrs = [cidr.strip() for cidr in rule["destination_address"].split(",")]
-    
-    print("\nAnalyzing Source CIDRs...")
-    src_analysis = analyze_cidrs(src_cidrs)
-    
-    if "error" in src_analysis:
-        print(f"Error analyzing source CIDRs: {src_analysis['error']}")
-    elif "message" in src_analysis:
-        print(f"Source CIDRs: {src_analysis['message']}")
-    else:
-        print(f"Found {len(src_analysis['networks'])} source networks")
-        print(f"Found {len(src_analysis['overlaps'])} overlapping source networks")
-        print(f"Found {len(src_analysis['mergeable'])} potentially mergeable source networks")
-        
-        if src_analysis['mergeable']:
-            print("\nSuggested Source CIDR Merges:")
-            for i, merge in enumerate(src_analysis['mergeable']):
-                print(f"{i+1}. Merge {merge['cidr1']} and {merge['cidr2']} into {merge['merged_cidr']}")
-                print(f"   Efficiency: {merge['efficiency']:.2f} (Original: {merge['original_size']} IPs, Merged: {merge['merged_size']} IPs)")
-            
-            print("\nEnter the numbers of the source CIDR merges to apply (comma-separated), or 'all' for all, or 'none' to skip:")
-            merge_input = input().strip().lower()
-            
-            merges_to_apply = []
-            if merge_input == 'all':
-                merges_to_apply = src_analysis['mergeable']
-            elif merge_input != 'none':
-                try:
-                    merge_indices = [int(idx.strip()) - 1 for idx in merge_input.split(',')]
-                    merges_to_apply = [src_analysis['mergeable'][idx] for idx in merge_indices if 0 <= idx < len(src_analysis['mergeable'])]
-                except (ValueError, IndexError):
-                    print("Invalid input, no merges will be applied to source CIDRs")
-            
-            if merges_to_apply:
-                src_cidrs = merge_cidrs(src_cidrs, merges_to_apply)
-                print(f"\nUpdated Source CIDRs: {', '.join(src_cidrs)}")
-    
-    print("\nAnalyzing Destination CIDRs...")
-    dst_analysis = analyze_cidrs(dst_cidrs)
-    
-    if "error" in dst_analysis:
-        print(f"Error analyzing destination CIDRs: {dst_analysis['error']}")
-    elif "message" in dst_analysis:
-        print(f"Destination CIDRs: {dst_analysis['message']}")
-    else:
-        print(f"Found {len(dst_analysis['networks'])} destination networks")
-        print(f"Found {len(dst_analysis['overlaps'])} overlapping destination networks")
-        print(f"Found {len(dst_analysis['mergeable'])} potentially mergeable destination networks")
-        
-        if dst_analysis['mergeable']:
-            print("\nSuggested Destination CIDR Merges:")
-            for i, merge in enumerate(dst_analysis['mergeable']):
-                print(f"{i+1}. Merge {merge['cidr1']} and {merge['cidr2']} into {merge['merged_cidr']}")
-                print(f"   Efficiency: {merge['efficiency']:.2f} (Original: {merge['original_size']} IPs, Merged: {merge['merged_size']} IPs)")
-            
-            print("\nEnter the numbers of the destination CIDR merges to apply (comma-separated), or 'all' for all, or 'none' to skip:")
-            merge_input = input().strip().lower()
-            
-            merges_to_apply = []
-            if merge_input == 'all':
-                merges_to_apply = dst_analysis['mergeable']
-            elif merge_input != 'none':
-                try:
-                    merge_indices = [int(idx.strip()) - 1 for idx in merge_input.split(',')]
-                    merges_to_apply = [dst_analysis['mergeable'][idx] for idx in merge_indices if 0 <= idx < len(dst_analysis['mergeable'])]
-                except (ValueError, IndexError):
-                    print("Invalid input, no merges will be applied to destination CIDRs")
-            
-            if merges_to_apply:
-                dst_cidrs = merge_cidrs(dst_cidrs, merges_to_apply)
-                print(f"\nUpdated Destination CIDRs: {', '.join(dst_cidrs)}")
-    
-    updated_rule = rule.copy()
-    updated_rule["source_address"] = ", ".join(src_cidrs)
-    updated_rule["destination_address"] = ", ".join(dst_cidrs)
-    
-    return updated_rule
-
-def merge_rule_cidrs(rule: Dict[str, Any], min_efficiency: float = 0.7) -> Dict[str, Any]:
-    """
-    Automatically merge CIDRs in a firewall rule based on efficiency threshold.
-    
-    Args:
-        rule: Firewall rule dictionary
-        min_efficiency: Minimum efficiency threshold for merging (default: 0.7)
-        
-    Returns:
-        Updated rule with merged CIDRs
-    """
-    src_cidrs = [cidr.strip() for cidr in rule["source_address"].split(",")]
-    dst_cidrs = [cidr.strip() for cidr in rule["destination_address"].split(",")]
-    
-    src_suggestions = suggest_cidr_merges(src_cidrs, min_efficiency)
-    dst_suggestions = suggest_cidr_merges(dst_cidrs, min_efficiency)
-    
-    if src_suggestions:
-        src_cidrs = merge_cidrs(src_cidrs, src_suggestions)
-    
-    if dst_suggestions:
-        dst_cidrs = merge_cidrs(dst_cidrs, dst_suggestions)
-    
-    updated_rule = rule.copy()
-    updated_rule["source_address"] = ", ".join(src_cidrs)
-    updated_rule["destination_address"] = ", ".join(dst_cidrs)
-    
-    updated_rule["merge_info"] = {
-        "src_merges_applied": len(src_suggestions),
-        "dst_merges_applied": len(dst_suggestions),
-        "src_merges": src_suggestions,
-        "dst_merges": dst_suggestions
+    return {
+        "address_space_ratio": round(address_space_ratio, 4),
+        "rule_reduction_ratio": round(rule_reduction_ratio, 4),
+        "overall_efficiency": round(overall_efficiency, 4)
     }
+
+def optimize_cidrs_by_usage(
+    logs_df: pd.DataFrame, 
+    cidr_list: List[str], 
+    ip_column: str, 
+    min_efficiency: float = 0.7
+) -> Tuple[List[str], Dict]:
+    """
+    Optimize CIDRs based on actual usage patterns in the logs.
+    Returns optimized CIDRs and efficiency metrics.
+    """
+    if cidr_list is None or len(cidr_list) <= 1:
+        return cidr_list, {}
     
-    return updated_rule
+    ip_counts = logs_df[ip_column].value_counts().to_dict()
+    
+    ip_to_cidr = {}
+    for cidr in cidr_list:
+        net = ipaddress.ip_network(cidr.strip(), strict=False)
+        for ip_str in ip_counts:
+            try:
+                ip = ipaddress.ip_address(ip_str)
+                if ip in net:
+                    ip_to_cidr[ip_str] = cidr
+            except ValueError:
+                continue
+    
+    cidr_usage = {}
+    for ip, cidr in ip_to_cidr.items():
+        cidr_usage.setdefault(cidr, 0)
+        cidr_usage[cidr] += ip_counts.get(ip, 0)
+    
+    sorted_cidrs = sorted(cidr_usage.items(), key=lambda x: x[1], reverse=True)
+    
+    result_cidrs = [sorted_cidrs[0][0]] if sorted_cidrs else []
+    
+    for cidr, _ in sorted_cidrs[1:]:
+        best_merge = None
+        best_efficiency = 0
+        
+        for i, existing in enumerate(result_cidrs):
+            test_merge = merge_overlapping_cidrs([existing, cidr])
+            
+            if len(test_merge) < 2:  # Successfully merged
+                efficiency = calculate_cidr_efficiency([existing, cidr], test_merge)
+                if efficiency["overall_efficiency"] > best_efficiency:
+                    best_merge = (i, test_merge[0])
+                    best_efficiency = efficiency["overall_efficiency"]
+        
+        if best_merge and best_efficiency >= min_efficiency:
+            i, merged_cidr = best_merge
+            result_cidrs[i] = merged_cidr
+        else:
+            result_cidrs.append(cidr)
+    
+    efficiency_metrics = calculate_cidr_efficiency(cidr_list, result_cidrs)
+    
+    return result_cidrs, efficiency_metrics
+
+def merge_cidrs(cidr_list: List[str]) -> List[str]:
+    """
+    Merge a list of CIDRs into optimized network ranges.
+    
+    Args:
+        cidr_list: List of CIDR strings
+        
+    Returns:
+        List of optimized CIDR strings
+    """
+    return merge_overlapping_cidrs(cidr_list)

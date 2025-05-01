@@ -1,8 +1,0 @@
-rule_name,hits,priority,description,recommended_action,source_zone,source_address,destination_zone,destination_address,application,service,url_category,action,profile_group,options,modified_date,created_date,risky_permissive,ingress_egress
-allow-web-https,1393,1,Allow HTTPS traffic to external websites,None,internal,192.168.0.0/16,external,any,web-browsing,https,any,allow,default,"log-start, log-end",2025-03-15,2024-10-01,permissive,egress
-allow-web-http,1430,2,Allow HTTP traffic to external websites,Consider restricting to HTTPS only,internal,192.168.0.0/16,external,any,web-browsing,http,any,allow,default,"log-start, log-end",2025-03-15,2024-10-01,permissive,egress
-allow-ssh,1443,3,Allow SSH access to internal servers,Restrict to specific source IPs,internal,192.168.0.0/16,dmz,10.0.0.0/24,ssh,ssh,any,allow,default,"log-start, log-end",2025-02-20,2024-10-01,risky,ingress
-allow-rdp,1453,4,Allow RDP access to internal servers,Restrict to specific source IPs,internal,192.168.0.0/16,dmz,10.0.0.0/24,rdp,rdp,any,allow,default,"log-start, log-end",2025-02-20,2024-10-01,risky,ingress
-allow-dns,1438,5,Allow DNS queries,Restrict to specific DNS servers,internal,192.168.0.0/16,external,"8.8.8.8, 8.8.4.4",dns,dns,any,allow,default,"log-start, log-end",2025-01-10,2024-10-01,permissive,egress
-allow-database-access,1444,6,Allow application servers to access database servers,Restrict to specific application servers,application,192.168.2.0/24,database,10.0.1.0/24,"mysql, mssql","mysql, mssql",any,allow,default,"log-start, log-end",2025-03-01,2024-11-15,permissive,ingress
-allow-any-any,1399,100,Allow any traffic (catch-all rule),Remove or restrict this rule,any,any,any,any,any,any,any,allow,default,"log-start, log-end",2025-01-01,2024-10-01,risky,both
